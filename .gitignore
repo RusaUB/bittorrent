@@ -1,0 +1,34 @@
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │                            macOS                                  │
+# └─────────────────────────────────────────────────────────────────────┘
+
+# Icon files
+Icon?
+# Resource forks and Finder flags
+.DS_Store
+.AppleDouble
+.LSOverride
+# Thumbnails
+._*
+# Spotlight metadata
+.Spotlight-V100
+# Trash
+.Trashes
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │                           Rust / Cargo                            │
+# └─────────────────────────────────────────────────────────────────────┘
+
+# Cargo build output
+target/
+
+
+# Compiled artifacts
+*.rlib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Debug symbols
+*.dSYM/
