@@ -1,79 +1,100 @@
-use serde_json::Value;
-use std::collections::BTreeMap;
+use std::path::PathBuf;
+use anyhow::{Context, Ok};
+use bittorrent::{hashes::Hashes, parse};
+use clap::{Parser, Subcommand};
+use serde_bencode;
+use serde::{Deserialize, Serialize};
 
-fn parse_value(input: &str) -> (Value, &str) {
-    let mut chars = input.chars();
 
-    match chars.next() {
-        Some('i') => {
-            // Integer: i<digits>e
-            if let Some(end) = input.find('e') {
-                let num = input[1..end].parse::<i64>().unwrap();
-                (Value::Number(num.into()), &input[end+1..])
-            } else {
-                panic!("Invalid bencode integer format");
-            }
-        }
-        Some('l') => {
-            // List: l<items>e
-            let mut rest = &input[1..]; // skip 'l'
-            let mut list = Vec::new();
+/// Metainfo files (also known as .torrent files) 
+#[derive(Debug, Clone, Deserialize)]
+struct Torrent {
+    /// URL to a "tracker", which is a central server that keeps
+    /// track of peers participating in the sharing of a torrent
+    announce : String,
+    /// Maps to a dictionary information about torrent file
+    info: Info,
+}
 
-            while !rest.starts_with('e') {
-                let (val, new_rest) = parse_value(rest);
-                list.push(val);
-                rest = new_rest;
-            }
 
-            (Value::Array(list), &rest[1..]) // skip final 'e'
-        }
-        Some('d') => {
-            // Dictionary: d<key><value>e
-            let mut rest = &input[1..]; // skip 'd'
-            let mut map = BTreeMap::new();
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct Info {
+    /// The name key maps to a UTF-8 encoded string which is the suggested name to save the file (or directory) as. 
+    /// It is purely advisory.
+    name: String,
 
-            while !rest.starts_with('e') {
-                // Keys must be byte strings
-                let (key, new_rest) = parse_value(rest);
-                rest = new_rest;
+    /// Piece length maps to the number of bytes in each piece the file is split into. 
+    /// For the purposes of transfer, files are split into fixed-size pieces which are all 
+    /// the same length except for possibly the last one which may be truncated. 
+    /// Piece length is almost always a power of two, most commonly 2 18 = 256 K (BitTorrent prior to version 3.2 uses 2 20 = 1 M as default).
+    #[serde(rename = "piece length")]
+    plength: usize,
 
-                let key_str = match key {
-                    Value::String(s) => s,
-                    _ => panic!("Bencode dictionary keys must be strings"),
-                };
+    /// Pieces maps to a string whose length is a multiple of 20. It is to be subdivided into strings of length 20, each of which is the SHA1 hash of the piece at the corresponding index.
+    pieces: Hashes,
 
-                let (val, new_rest) = parse_value(rest);
-                rest = new_rest;
+    /// There is also a key length or a key files, but not both or neither. If length is present then the download represents a single file, otherwise it represents a set of files which go in a directory structure.
+    #[serde(flatten)]
+    keys: Keys
+}
 
-                map.insert(key_str, val);
-            }
+/// There is a key `length` or a key `files`, but not both or neither.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Keys {
+    /// If `length` is present then the download represents a single file.
+    SingleFile {
+        /// The length of the file in bytes.
+        length: usize,
+    },
+    /// Otherwise it represents a set of files which go in a directory structure.
+    ///
+    /// For the purposes of the other keys in `Info`, the multi-file case is treated as only having
+    /// a single file by concatenating the files in the order they appear in the files list.
+    MultiFile { files: Vec<File> },
+}
 
-            (Value::Object(map.into_iter().collect()), &rest[1..]) // skip final 'e'
-        }
-        Some(c) if c.is_ascii_digit() => {
-            // Byte string: <length>:<content>
-            let colon_index = input.find(':').unwrap();
-            let len = input[..colon_index].parse::<usize>().unwrap();
-            let start = colon_index + 1;
-            let end = start + len;
-            let string = &input[start..end];
-            (Value::String(string.to_string()), &input[end..])
-        }
-        _ => panic!("Unsupported or invalid bencode format"),
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct File {
+    /// The length of the file, in bytes.
+    pub length: usize,
+
+    /// Subdirectory names for this file, the last of which is the actual file name
+    /// (a zero length list is an error case).
+    pub path: Vec<String>,
+}
+
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug,Subcommand)]
+enum Command {
+    Decode {
+        value: String,
+    },
+    Info {
+        torrent: PathBuf
     }
 }
 
-fn decode_bencoded_value(encoded: &str) -> Value {
-    let (val, _) = parse_value(encoded);
-    val
-}
+fn main() -> anyhow::Result<()>{
+    let args = Args::parse();
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let command = &args[1];
-    if command == "decode" {
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.to_string());
+    match args.command {
+        Command::Decode { value } => {
+            let v: serde_json::Value = parse::decode_bencoded_value(&value);
+            println!("{v}");
+        }
+        Command::Info { torrent } => {
+            let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
+            let t: Torrent = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+            eprintln!("{t:?}")
+        }
     }
+    Ok(())
 }
