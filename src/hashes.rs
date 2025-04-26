@@ -9,13 +9,13 @@ use std::fmt;
 /// 
 /// file = "Hello WorldHello WorldHello WorldHello World"
 /// 
-/// piece length = 10 bytes
+/// piece length = 20 bytes
 /// 
-/// SHA1("Hello wor") = 0a1b2c3d4e5f6789abcdef1234567890abcdef12
+/// SHA1("Hello WorldHello Wor") = 0f64f4d0224da5c3d8e3a6c0f46649b31e995da4 
 /// 
-/// SHA1("ld! This ") = 1b2c3d4e5f6789abcdef1234567890abcdef123
+/// SHA1("ldHello WorldHello W") = 9e9b04849ea85a4ef1af07da6185ac701b4ccc4 
 /// 
-/// ...
+/// SHA1("orld") = c5161053358305d4523ea755a46229ede4dc845a 
 #[derive(Debug, Clone)]
 pub struct Hashes(pub Vec<[u8; 20]>);
 struct HashesVisitor;
