@@ -1,14 +1,51 @@
-use std::usize;
+use serde_json::Value;
 
-fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
-    // <length>:<contents>
-    if let Some((len,content)) = encoded_value.split_once(":"){
-        if let Ok(len) = len.parse::<usize>(){
-            return serde_json::Value::String(content[..len].to_string());
+
+fn parse_value(input: &str) -> (Value, &str) {
+    let mut chars = input.chars();
+
+    match chars.next() {
+        Some('i') => {
+            // Integer: i<digits>e
+            if let Some(end) = input.find('e') {
+                let num = &input[1..end].parse::<i64>().unwrap();
+                (Value::Number((*num).into()), &input[end+1..])
+            } else {
+                panic!("Invalid bencode integer format");
+            }
         }
+        Some('l') => {
+            // List: l<items>e
+            let mut rest = &input[1..]; // skip 'l'
+            let mut list = Vec::new();
+
+            while !rest.starts_with('e') {
+                let (val, new_rest) = parse_value(rest);
+                list.push(val);
+                rest = new_rest;
+            }
+
+            (Value::Array(list), &rest[1..]) // skip final 'e'
+        }
+        Some(c) if c.is_ascii_digit() => {
+            // Byte string: <length>:<content>
+            let colon_index = input.find(':').unwrap();
+            let len = input[..colon_index].parse::<usize>().unwrap();
+            let start = colon_index + 1;
+            let end = start + len;
+            let string = &input[start..end];
+            (Value::String(string.to_string()), &input[end..])
+        }
+        _ => panic!("Unsupported or invalid bencode format"),
     }
-    panic!("Unhandled encoded value {}", encoded_value)
 }
+
+
+fn decode_bencoded_value(encoded: &str) -> Value {
+    let (val, _) = parse_value(encoded);
+    val
+}
+
 
 fn main(){
     let args: Vec<String> = std::env::args().collect();
