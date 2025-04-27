@@ -4,10 +4,10 @@ use bittorrent::{hashes::Hashes, parse};
 use clap::{Parser, Subcommand};
 use serde_bencode;
 use serde::{Deserialize, Serialize};
-
+use sha1::{Sha1, Digest};
 
 /// Metainfo files (also known as .torrent files) 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Torrent {
     /// URL to a "tracker", which is a central server that keeps
     /// track of peers participating in the sharing of a torrent
@@ -93,7 +93,18 @@ fn main() -> anyhow::Result<()>{
         Command::Info { torrent } => {
             let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
             let t: Torrent = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
-            eprintln!("{t:?}")
+            eprintln!("{t:?}");
+
+            // turn the structure back into a bencoded byte string, as it should look like in a .torrent file
+            let info_encoded = serde_bencode::to_bytes(&t.info).context("re-encode info section")?;
+
+            let mut hasher = Sha1::new();
+            
+            // feed the data, just serialised into the hasher 
+            hasher.update(&info_encoded);
+            let info_hash = hasher.finalize();
+
+            println!("Info Hash: {}", hex::encode(&info_hash));
         }
     }
     Ok(())
