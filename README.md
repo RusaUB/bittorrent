@@ -42,16 +42,16 @@ The structure of a `.torrent` file:
 
 - **announce-list**: (Optional) A list of backup trackers. If the main tracker fails, clients can try others.
 
-- **files**: Information about the files included in the torrent — their lengths and paths.
+- **info**: A dictionary that contains detailed information about the shared file(s).  
+  Inside the `info` dictionary : 
 
-- **name**: A suggested name for the file or directory when saving.
-
-- **piece length**: The size of each piece in bytes. Usually a power of two (e.g., 32KB, 256KB).
-
-- **pieces**: A single long sequence of SHA-1 hashes. Each 20-byte chunk corresponds to the expected hash of a file piece.
+  - **name**: A suggested name for the file or directory when saving.
+  - **files**: (If it is a multi-file torrent) Information about the files — their lengths and paths.
+  - **piece length**: The size of each piece in bytes. Usually a power of two (e.g., 32KB, 256KB).
+  - **pieces**: A single long sequence of SHA-1 hashes. Each 20-byte chunk corresponds to the expected hash of a file piece.
 
 **Important Concepts:**
 - The client needs to communicate with the tracker before it can find peers.
-- Files are split into many small \"pieces\" for efficient sharing.
+- The actual file description and piece hashes are located inside the `info` dictionary.
+- Files are split into many small "pieces" for efficient sharing.
 - Every piece is checked against its hash to guarantee data integrity and prevent corruption.
-
