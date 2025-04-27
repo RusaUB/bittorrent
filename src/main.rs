@@ -39,6 +39,8 @@ async fn main() -> anyhow::Result<()>{
             let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
             let t: Torrent = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
 
+            println!("Announce: {}", t.announce);
+
             let length = if let Keys::SingleFile { length } = t.info.keys {
                 println!("Length: {length}");
                 length
