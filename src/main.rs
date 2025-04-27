@@ -99,12 +99,22 @@ fn main() -> anyhow::Result<()>{
             let info_encoded = serde_bencode::to_bytes(&t.info).context("re-encode info section")?;
 
             let mut hasher = Sha1::new();
-            
+
             // feed the data, just serialised into the hasher 
             hasher.update(&info_encoded);
             let info_hash = hasher.finalize();
 
             println!("Info Hash: {}", hex::encode(&info_hash));
+            println!("Piece Length: {}", t.info.plength);
+
+
+            let pieces = &t.info.pieces;
+            println!("Piece Hashes:");            
+            for i in pieces.0.iter(){
+                let piece_hash = hex::encode(i);
+                println!("{}", piece_hash)
+            }
+
         }
     }
     Ok(())
