@@ -1,6 +1,6 @@
 use super::{hashes::Hashes};
 use serde::{Deserialize, Serialize};
-
+use sha1::{Sha1, Digest};
 /// Metainfo files (also known as .torrent files) 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Torrent {
@@ -57,4 +57,17 @@ pub struct File {
     /// Subdirectory names for this file, the last of which is the actual file name
     /// (a zero length list is an error case).
     pub path: Vec<String>,
+}
+
+impl Torrent {
+    pub fn info_hash(&self) -> [u8; 20] {
+        let info_encoded =
+            serde_bencode::to_bytes(&self.info).expect("re-encode info section should be fine");
+        let mut hasher = Sha1::new();
+        hasher.update(&info_encoded);
+        hasher
+            .finalize()
+            .try_into()
+            .expect("GenericArray<_, 20> == [_; 20]")
+    }
 }

@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use anyhow::{Context, Ok};
-use bittorrent::{parse};
+use bittorrent::{parse, torrent::Keys, tracker::{TrackerRequest, TrackerResponse}};
 use clap::{Parser, Subcommand};
 use serde_bencode;
-use sha1::{Sha1, Digest};
 use bittorrent::torrent::{Torrent};
+
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -20,10 +20,14 @@ enum Command {
     },
     Info {
         torrent: PathBuf
+    },
+    Peers {
+        torrent: PathBuf
     }
 }
 
-fn main() -> anyhow::Result<()>{
+#[tokio::main]
+async fn main() -> anyhow::Result<()>{
     let args = Args::parse();
 
     match args.command {
@@ -34,16 +38,15 @@ fn main() -> anyhow::Result<()>{
         Command::Info { torrent } => {
             let dot_torrent = std::fs::read(torrent).context("open torrent file")?;
             let t: Torrent = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
-            eprintln!("{t:?}");
 
-            // turn the structure back into a bencoded byte string, as it should look like in a .torrent file
-            let info_encoded = serde_bencode::to_bytes(&t.info).context("re-encode info section")?;
+            let length = if let Keys::SingleFile { length } = t.info.keys {
+                println!("Length: {length}");
+                length
+            } else {
+                todo!();
+            };
 
-            let mut hasher = Sha1::new();
-
-            // feed the data, just serialised into the hasher 
-            hasher.update(&info_encoded);
-            let info_hash = hasher.finalize();
+            let info_hash = t.info_hash();
 
             println!("Info Hash: {}", hex::encode(&info_hash));
             println!("Piece Length: {}", t.info.plength);
@@ -55,8 +58,52 @@ fn main() -> anyhow::Result<()>{
                 let piece_hash = hex::encode(i);
                 println!("{}", piece_hash)
             }
+        }
+        Command::Peers { torrent } => {
+            let dot_torrent = std::fs::read(torrent).context("read torrent file")?;
+            let t: Torrent =
+                serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+            let length = if let Keys::SingleFile { length } = t.info.keys {
+                length
+            } else {
+                todo!();
+            };
 
+            let info_hash = t.info_hash();
+            let request = TrackerRequest {
+                peer_id: String::from("00112233445566778899"),
+                port: 6881,
+                uploaded: 0,
+                downloaded: 0,
+                left: length,
+                compact: 1,
+            };
+
+            let url_params =
+                serde_urlencoded::to_string(&request).context("url-encode tracker parameters")?;
+            let tracker_url = format!(
+                "{}?{}&info_hash={}",
+                t.announce,
+                url_params,
+                &urlencode(&info_hash)
+            );
+            let response = reqwest::get(tracker_url).await.context("query tracker")?;
+            let response = response.bytes().await.context("fetch tracker response")?;
+            let response: TrackerResponse =
+                serde_bencode::from_bytes(&response).context("parse tracker response")?;
+            for peer in &response.peers.0 {
+                println!("{}:{}", peer.ip(), peer.port());
+            }
         }
     }
     Ok(())
+}
+
+fn urlencode(t: &[u8; 20]) -> String {
+    let mut encoded = String::with_capacity(3 * t.len());
+    for &byte in t {
+        encoded.push('%');
+        encoded.push_str(&hex::encode(&[byte]));
+    }
+    encoded
 }
