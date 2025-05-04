@@ -1,31 +1,25 @@
 # BitTorrent V1 Simulation in Rust
 
-This project simulates the behavior of the classic BitTorrent V1 protocol, fully implemented in **Rust**.
-It focuses on core concepts such as trackers, peers, seeds, and file piece distribution, demonstrating the mechanics behind distributed file sharing.
-
+This project simulates the behavior of the classic BitTorrent V1 protocol, fully implemented in **Rust**. It focuses on core concepts such as trackers, peers, seeds, and file piece distribution, demonstrating the mechanics behind distributed file sharing.
 
 [BEP 3 - The BitTorrent Protocol Specification](https://www.bittorrent.org/beps/bep_0003.html) specifically describes the original design of BitTorrent, including `.torrent` files, tracker communication, peer connections, and piece verification.
 
 ---
 
-
 # Overview
 
-BitTorrent is a peer-to-peer (P2P) protocol designed to efficiently distribute large files across multiple participants (peers) without overloading any single server.
-
+BitTorrent is a peer-to-peer (P2P) protocol designed to efficiently distribute large files across multiple participants without overloading any single server. The ecosystem consists of several key components working together:
 
 ![BitTorrent Protocol Layout](./assets/torrent_overview.png)
 
-Definitions: 
+The BitTorrent ecosystem consists of several key participants:
 
-- **Tracker**: A central server that coordinates the list of peers but does not transfer data itself.
-- **Seed**: A peer that has the **full copy** of the file and only uploads pieces to others.
-- **Peer**: A client participating in the file exchange; it may have only a subset of the file.
-- **Leech**: A peer that is still **downloading** the file and not yet a complete seed.
+- **Tracker**: A central coordinator that maintains lists of peers but doesn't transfer any file data itself
+- **Seed**: A peer with a complete copy of the file who only uploads to others
+- **Peer**: A client participating in file exchange who may have a partial or complete copy
+- **Leech**: A peer that is still downloading the file and not yet a complete seed
 
-Dashed lines represent peer-to-peer (P2P) communication channels where file pieces are exchanged directly.
-
-The Tracker only facilitates the initial peer discovery (via request/response), after which peers communicate directly without further Tracker involvement.
+The communication pattern is straightforward: peers connect to the tracker initially to discover other participants, then establish direct P2P connections with each other to exchange file pieces. After the initial discovery phase, the tracker is no longer needed for the actual data transfer, making the system highly resilient.
 
 ---
 
@@ -33,25 +27,53 @@ The Tracker only facilitates the initial peer discovery (via request/response), 
 
 ![Torrent File Structure](./assets/torrent_file.png)
 
-The structure of a `.torrent` file:
+A `.torrent` file contains all the metadata needed to join a swarm and download content. At its core is the `announce` URL pointing to the tracker server. When a client reads this file, it uses this URL to contact the tracker and request information about other peers sharing the same file. For redundancy, an optional `announce-list` may provide backup trackers in case the primary one fails.
 
-- **announce**: URL of the tracker server.  
+The heart of a torrent file lies in its `info` dictionary. This section contains the suggested `name` for saving the file or directory and details about included `files` in multi-file torrents. Files are divided into equal-sized segments called "pieces" (usually powers of two like 32KB or 256KB), defined by the `piece length` parameter. Each piece is verified using SHA-1 hashes stored in the `pieces` field—a concatenated sequence where each 20-byte chunk corresponds to one file piece.
 
-  When a client reads a `.torrent` file, the first thing it looks for is the `announce` field.  
-  The client uses this URL to send a request to the tracker and ask for a list of peers sharing the same file.
+### Bencode Format
 
-- **announce-list**: (Optional) A list of backup trackers. If the main tracker fails, clients can try others.
+BitTorrent files employ a straightforward encoding format called "bencode" (pronounced "bee-encode") that supports four data types:
 
-- **info**: A dictionary that contains detailed information about the shared file(s).  
-  Inside the `info` dictionary : 
+| Data Type   | Format                           | Example                | Decoded Value            |
+|-------------|----------------------------------|-----------------------|--------------------------|
+| String      | `<length>:<contents>`            | `5:hello`              | `"hello"`                |
+| Integer     | `i<number>e`                     | `i42e`                 | `42`                     |
+| List        | `l<item1><item2>...e`            | `l5:helloi42ee`        | `["hello", 42]`          |
+| Dictionary  | `d<key1><value1><key2><value2>...e` | `d5:hello5:worlde`  | `{"hello": "world"}`     |
 
-  - **name**: A suggested name for the file or directory when saving.
-  - **files**: (If it is a multi-file torrent) Information about the files — their lengths and paths.
-  - **piece length**: The size of each piece in bytes. Usually a power of two (e.g., 32KB, 256KB).
-  - **pieces**: A single long sequence of SHA-1 hashes. Each 20-byte chunk corresponds to the expected hash of a file piece.
+This efficient serialization format allows clients to decode .torrent files and extract all necessary information to participate in the swarm. The decoding process is the first step a client takes when joining a torrent.
 
-**Important Concepts:**
-- The client needs to communicate with the tracker before it can find peers.
-- The actual file description and piece hashes are located inside the `info` dictionary.
-- Files are split into many small "pieces" for efficient sharing.
-- Every piece is checked against its hash to guarantee data integrity and prevent corruption.
+For integrity and security, every file piece is validated against its corresponding hash, ensuring data remains uncorrupted during transfer. Before any peer interaction can begin, the client must first communicate with the tracker using information from the decoded torrent file.
+
+## Tracker Communication
+
+### GET Request
+
+When a client wants to join a swarm, it initiates contact with the tracker through a GET request containing essential information:
+
+![GET Request from Leech to Tracker](./assets/get_request.png)
+
+The request includes the `info_hash` (SHA-1 hash of the info dictionary) that uniquely identifies the desired content. The client also sends its `peer_id` for identification, along with network details like `ip` address and listening `port`. 
+
+Progress statistics are communicated through the `uploaded`, `downloaded`, and `left` parameters, which track how much data has been shared, received, and remains needed. The client's status is indicated by the `event` parameter, which can signal when a client has started, completed, or stopped its participation.
+
+### Tracker Response
+
+Upon receiving a request, the tracker responds with information about the swarm:
+
+![Tracker Response to Leech](./assets/tracker_response.png)
+
+The response includes an `interval` value telling the client how frequently (in seconds) it should contact the tracker for updates. Most importantly, it provides a list of `peers` currently sharing the requested torrent, including their IP addresses and ports for direct connection.
+
+This representation simplifies the actual implementation, which includes additional parameters and robust error handling to manage various edge cases.
+
+## Peer Handshake
+
+Before exchanging any data, peers must establish a connection through a handshake process:
+
+![Peer Handshake Process](./assets/handshake.png)
+
+The handshake message contains several fields in sequence: a `length` byte indicating the protocol string size (19 bytes), the `protocol_id` string ("BitTorrent protocol"), eight `reserved` bytes for protocol extensions, the `info_hash` to confirm both peers want the same content, and the sender's `peer_id`.
+
+Both sides must exchange these messages and verify that the received info_hash matches their expected torrent. Only after successful verification can peers begin exchanging actual file data. This handshake ensures that connections are established only between peers interested in the same content and provides basic identity verification.
