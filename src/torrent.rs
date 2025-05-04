@@ -1,6 +1,13 @@
 use super::{hashes::Hashes};
+
+use crate::download::Downloaded;
+
+use super::download;
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use sha1::{Sha1, Digest};
+use sha1::{Digest, Sha1};
+use std::path::Path;
+
 /// Metainfo files (also known as .torrent files) 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Torrent {
@@ -69,5 +76,35 @@ impl Torrent {
             .finalize()
             .try_into()
             .expect("GenericArray<_, 20> == [_; 20]")
+    }
+
+    pub async fn read(file: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let dot_torrent = tokio::fs::read(file).await.context("read torrent file")?;
+        let t: Torrent = serde_bencode::from_bytes(&dot_torrent).context("parse torrent file")?;
+        Ok(t)
+    }
+
+    pub fn print_tree(&self) {
+        match &self.info.keys {
+            Keys::SingleFile { .. } => {
+                eprintln!("{}", self.info.name);
+            }
+            Keys::MultiFile { files } => {
+                for file in files {
+                    eprintln!("{}", file.path.join(std::path::MAIN_SEPARATOR_STR));
+                }
+            }
+        }
+    }
+
+    pub fn length(&self) -> usize {
+        match &self.info.keys {
+            Keys::SingleFile { length } => *length,
+            Keys::MultiFile { files } => files.iter().map(|file| file.length).sum(),
+        }
+    }
+
+    pub async fn download_all(&self) -> anyhow::Result<Downloaded> {
+        download::all(self).await
     }
 }
